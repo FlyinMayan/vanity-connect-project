@@ -103,6 +103,14 @@ export const lambdaHandler = async (event: any): Promise<any> => {
 
 // 2) GetRecentCallers - HTTP endpoint for last 5 callers
 export const getRecentCallers = async (): Promise<APIGatewayProxyResult> => {
+  
+  const corsHeaders = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "http://localhost:5174",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+
   try {
     if (!TABLE_NAME) {
       throw new Error("TABLE_NAME env var is not set");
@@ -137,18 +145,14 @@ export const getRecentCallers = async (): Promise<APIGatewayProxyResult> => {
     return {
       statusCode: 200,
       body: JSON.stringify(last5),
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: corsHeaders,
     };
   } catch (err) {
     console.error("Error in getRecentCallers", err);
     return {
       statusCode: 500,
       body: JSON.stringify({ message: "Internal server error" }),
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers:corsHeaders,
     };
   }
 };
