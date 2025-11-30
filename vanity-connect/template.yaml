@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Vanity numbers demo for Amazon Connect
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 10
+    MemorySize: 256
+
+Resources:
+  # 1) DynamoDB table to store calls + vanity numbers
+  VanityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: VanityCalls
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  # 2) Vanity Lambda - called by Amazon Connect
+  VanityLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello-world/
+      Handler: app.lambdaHandler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref VanityTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VanityTable
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/app.ts
+        Minify: true
+        Target: "es2020"
+      # No API event here – this will be invoked by Amazon Connect later
+
+  # 3) GetRecentCallers Lambda - exposed via HTTP endpoint for web app
+  GetRecentCallersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello-world/
+      Handler: app.getRecentCallers
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref VanityTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref VanityTable
+      Events:
+        HttpRecentCallers:
+          Type: HttpApi
+          Properties:
+            Path: /recent-callers
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/app.ts
+        Minify: true
+        Target: "es2020"
+
+Outputs:
+  VanityTableName:
+    Value: !Ref VanityTable
+  VanityLambdaArn:
+    Value: !GetAtt VanityLambda.Arn
+  RecentCallersApiUrl:
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/recent-callers"
