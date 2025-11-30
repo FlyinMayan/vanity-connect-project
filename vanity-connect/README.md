@@ -1,127 +1,106 @@
-# vanity-connect
+# Vanity Numbers + Amazon Connect Project
 
-This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI. It includes the following files and folders.
+This project implements a small end-to-end system that:
 
-- hello-world - Code for the application's Lambda function written in TypeScript.
-- events - Invocation events that you can use to invoke the function.
-- hello-world/tests - Unit tests for the application code. 
-- template.yaml - A template that defines the application's AWS resources.
+1. Accepts inbound phone calls via **Amazon Connect**
+2. Uses an **AWS Lambda** function to generate T9-based vanity numbers for the caller’s phone number
+3. Stores the top 5 vanity candidates in **DynamoDB**
+4. Exposes a **`GET /recent-callers`** API via **API Gateway**
+5. Displays the last 5 callers and their vanity numbers in a **React frontend** (shippable as static files, no dev tools required to view)
 
-The application uses several AWS resources, including Lambda functions and an API Gateway API. These resources are defined in the `template.yaml` file in this project. You can update the template to add AWS resources through the same deployment process that updates your application code.
+---
 
-If you prefer to use an integrated development environment (IDE) to build and test your application, you can use the AWS Toolkit.  
-The AWS Toolkit is an open source plug-in for popular IDEs that uses the SAM CLI to build and deploy serverless applications on AWS. The AWS Toolkit also adds a simplified step-through debugging experience for Lambda function code. See the following links to get started.
+## High-Level Architecture
 
-* [CLion](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [GoLand](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [IntelliJ](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [WebStorm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [Rider](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [PhpStorm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [PyCharm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [RubyMine](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [DataGrip](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [VS Code](https://docs.aws.amazon.com/toolkit-for-vscode/latest/userguide/welcome.html)
-* [Visual Studio](https://docs.aws.amazon.com/toolkit-for-visual-studio/latest/user-guide/welcome.html)
+1. **Caller dials Amazon Connect number**
+   - Amazon Connect invokes the vanity Lambda function and passes the caller’s phone number.
 
-## Deploy the sample application
+2. **Lambda: Vanity generator (in `vanity-connect/`)**
+   - Normalizes the caller’s phone number
+   - Uses a **T9 mapping** and a **dictionary of 4-letter words** to generate vanity candidates
+   - Always produces up to **5** “best” vanity numbers
+   - Returns the **top 3** to Amazon Connect (for the voice menu)
+   - Stores the caller record + top 5 vanity numbers in DynamoDB as:
 
-The Serverless Application Model Command Line Interface (SAM CLI) is an extension of the AWS CLI that adds functionality for building and testing Lambda applications. It uses Docker to run your functions in an Amazon Linux environment that matches Lambda. It can also emulate your application's build environment and API.
+     ```json
+     {
+       "pk": "CALL",
+       "sk": "2025-11-30T18:00:00.000Z",
+       "callerNumber": "7203418574",
+       "vanityNumbers": [
+         "720-341-VLSI",
+         "720-341-CALL",
+         "720-341-HELP",
+         "720-341-HOME",
+         "720-341-FREE"
+       ]
+     }
+     ```
 
-To use the SAM CLI, you need the following tools.
+3. **DynamoDB table**
+   - **Partition key (`pk`)**: constant `"CALL"` to group all call records
+   - **Sort key (`sk`)**: ISO timestamp of the call
+   - This effectively creates an **append-only call log, newest last**, that can be sorted by `sk` to fetch the latest calls.
 
-* SAM CLI - [Install the SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
-* Node.js - [Install Node.js 20](https://nodejs.org/en/), including the NPM package management tool.
-* Docker - [Install Docker community edition](https://hub.docker.com/search/?type=edition&offering=community)
+4. **Lambda: `getRecentCallers` (in `vanity-connect/`)**
+   - Scans the DynamoDB table for `pk = "CALL"`
+   - Sorts results by `sk` descending (newest first)
+   - Returns the last 5 calls in a simple JSON shape:
 
-To build and deploy your application for the first time, run the following in your shell:
+     ```json
+     [
+       {
+         "callerNumber": "7203418574",
+         "vanityNumbers": ["720-341-VLSI", "720-341-CALL", "720-341-HELP"],
+         "calledAt": "2025-11-30T18:00:00.000Z"
+       },
+       ...
+     ]
+     ```
 
-```bash
-sam build
-sam deploy --guided
-```
+5. **API Gateway**
+   - Exposes the `getRecentCallers` Lambda as:
 
-The first command will build the source of your application. The second command will package and deploy your application to AWS, with a series of prompts:
+     ```text
+     GET /recent-callers
+     ```
 
-* **Stack Name**: The name of the stack to deploy to CloudFormation. This should be unique to your account and region, and a good starting point would be something matching your project name.
-* **AWS Region**: The AWS region you want to deploy your app to.
-* **Confirm changes before deploy**: If set to yes, any change sets will be shown to you before execution for manual review. If set to no, the AWS SAM CLI will automatically deploy application changes.
-* **Allow SAM CLI IAM role creation**: Many AWS SAM templates, including this example, create AWS IAM roles required for the AWS Lambda function(s) included to access AWS services. By default, these are scoped down to minimum required permissions. To deploy an AWS CloudFormation stack which creates or modifies IAM roles, the `CAPABILITY_IAM` value for `capabilities` must be provided. If permission isn't provided through this prompt, to deploy this example you must explicitly pass `--capabilities CAPABILITY_IAM` to the `sam deploy` command.
-* **Save arguments to samconfig.toml**: If set to yes, your choices will be saved to a configuration file inside the project, so that in the future you can just re-run `sam deploy` without parameters to deploy changes to your application.
+   - CORS is enabled so the React frontend can call it from a browser:
 
-You can find your API Gateway Endpoint URL in the output values displayed after deployment.
+     ```http
+     Access-Control-Allow-Origin: *
+     Access-Control-Allow-Methods: GET,OPTIONS
+     Access-Control-Allow-Headers: Content-Type
+     ```
 
-## Use the SAM CLI to build and test locally
+6. **React Frontend (in `vanity-frontend/`)**
+   - Simple dashboard that:
+     - Calls `GET /recent-callers`
+     - Displays a table of the last 5 callers
+     - Shows their vanity numbers and timestamp
+   - Built with **Vite + React + TypeScript**
+   - A **pre-built static bundle** is included so reviewers don’t need Node/Vite to view it.
 
-Build your application with the `sam build` command.
+---
 
-```bash
-vanity-connect$ sam build
-```
+## Repository Structure
 
-The SAM CLI installs dependencies defined in `hello-world/package.json`, compiles TypeScript with esbuild, creates a deployment package, and saves it in the `.aws-sam/build` folder.
+```text
+vanity-connect-project/
+  README.md
 
-Test a single function by invoking it directly with a test event. An event is a JSON document that represents the input that the function receives from the event source. Test events are included in the `events` folder in this project.
+  vanity-connect/           # Backend: AWS Lambda + DynamoDB + API definitions
+    # (handlers, utils, SAM/CloudFormation template, etc.)
 
-Run functions locally and invoke them with the `sam local invoke` command.
-
-```bash
-vanity-connect$ sam local invoke HelloWorldFunction --event events/event.json
-```
-
-The SAM CLI can also emulate your application's API. Use the `sam local start-api` to run the API locally on port 3000.
-
-```bash
-vanity-connect$ sam local start-api
-vanity-connect$ curl http://localhost:3000/
-```
-
-The SAM CLI reads the application template to determine the API's routes and the functions that they invoke. The `Events` property on each function's definition includes the route and method for each path.
-
-```yaml
-      Events:
-        HelloWorld:
-          Type: Api
-          Properties:
-            Path: /hello
-            Method: get
-```
-
-## Add a resource to your application
-The application template uses AWS Serverless Application Model (AWS SAM) to define application resources. AWS SAM is an extension of AWS CloudFormation with a simpler syntax for configuring common serverless application resources such as functions, triggers, and APIs. For resources not included in [the SAM specification](https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md), you can use standard [AWS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-template-resource-type-ref.html) resource types.
-
-## Fetch, tail, and filter Lambda function logs
-
-To simplify troubleshooting, SAM CLI has a command called `sam logs`. `sam logs` lets you fetch logs generated by your deployed Lambda function from the command line. In addition to printing the logs on the terminal, this command has several nifty features to help you quickly find the bug.
-
-`NOTE`: This command works for all AWS Lambda functions; not just the ones you deploy using SAM.
-
-```bash
-vanity-connect$ sam logs -n HelloWorldFunction --stack-name vanity-connect --tail
-```
-
-You can find more information and examples about filtering Lambda function logs in the [SAM CLI Documentation](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-logging.html).
-
-## Unit tests
-
-Tests are defined in the `hello-world/tests` folder in this project. Use NPM to install the [Jest test framework](https://jestjs.io/) and run unit tests.
-
-```bash
-vanity-connect$ cd hello-world
-hello-world$ npm install
-hello-world$ npm run test
-```
-
-## Cleanup
-
-To delete the sample application that you created, use the AWS CLI. Assuming you used your project name for the stack name, you can run the following:
-
-```bash
-sam delete --stack-name vanity-connect
-```
-
-## Resources
-
-See the [AWS SAM developer guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html) for an introduction to SAM specification, the SAM CLI, and serverless application concepts.
-
-Next, you can use AWS Serverless Application Repository to deploy ready to use Apps that go beyond hello world samples and learn how authors developed their applications: [AWS Serverless Application Repository main page](https://aws.amazon.com/serverless/serverlessrepo/)
+  vanity-frontend/          # Frontend: React + Vite + TypeScript
+    src/
+      App.tsx
+      main.tsx
+      # React components and styling
+    vite.config.ts
+    tsconfig*.json
+    package.json
+    # Built static files live in:
+    dist/
+      index.html
+      assets/...
