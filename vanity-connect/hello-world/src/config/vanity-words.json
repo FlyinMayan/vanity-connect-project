@@ -78,6 +78,8 @@
     "WORD",
     "YEAR",
     "ZONE",
-    "ZERO"
+    "ZERO",
+    "VLSI",
+    "ULSI"
   ]
 }

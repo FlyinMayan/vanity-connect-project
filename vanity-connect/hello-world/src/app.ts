@@ -15,6 +15,9 @@
 import {DynamoDBClient,} from "@aws-sdk/client-dynamodb";
 import {DynamoDBDocumentClient,PutCommand,ScanCommand,} from "@aws-sdk/lib-dynamodb";
 import { APIGatewayProxyResult } from "aws-lambda";
+import vanityWords from "./config/vanity-words.json";
+
+const CANDIDATE_WORDS: string[] = vanityWords.fourLetterWords;
 
 //Vanity record has the partition key of CALL so that the record is grouped in Dynamo DB
 //Timestamp is used as the sort key so that we can meet the front end requirement of showing the most recent callers. 
@@ -86,18 +89,12 @@ export const lambdaHandler = async (event: any): Promise<any> => {
     `Thank you for calling. Goodbye.`;
 
   return {
-    vanity1: v1,
-    vanity2: v2,
-    vanity3: v3,
     speechText,
   };
   } catch (err) {
     console.error("Error in vanity lambda", err);
     // Simple, caller-safe error shape
     return {
-      vanity1: "",
-      vanity2: "",
-      vanity3: "",
       speechText: "Sorry, an error occurred while generating your vanity numbers.",
       error: "true",
     };
@@ -171,24 +168,7 @@ const T9_MAP: Record<string, string> = {
   "8": "TUV",
   "9": "WXYZ",
 };
-// Temporary "dictionary" for possible vanitys
-const CANDIDATE_WORDS: string[] = [
-  "CALL",
-  "HELP",
-  "HOME",
-  "SALE",
-  "DEAL",
-  "PIZZA",
-  "TECH",
-  "CLOUD",
-  "AWS",
-  "SERVICE",
-  "SUPPORT",
-  "COACH",
-  "LEGAL",
-  "QUOTE",
-  // ...etc
-];
+// Temporary "dictionary" that covers the full T9 Range of four letter words.
 
 function normalizePhone(raw: string): string | null {
   if (!raw) return null;
@@ -198,19 +178,58 @@ function normalizePhone(raw: string): string | null {
   return digits.slice(-10);
 }
 
+// Converts words to T9 digits
+// function: ensure that the word is in caps and remove anything that is not a letter A-Z
+// Split the string into an array of characters and look up the T9 digit for each character
+// combine the digits into one string
+function wordToT9(word: string): string {
+  return word
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .split("")
+    .map((ch) => LETTER_TO_T9[ch] ?? "")
+    .join("");
+}
+// Reverse map: letter → digit (built once at startup)
+// function : get all the t9 entries and turn the T9 map into an arrray of entries
+// We use the reducer to iterate over each entry and add them into acc 
+const LETTER_TO_T9: Record<string, string> = Object.entries(T9_MAP).reduce(
+  (acc, [digit, letters]) => {
+    for (const ch of letters) {
+      acc[ch] = digit;
+    }
+    return acc;
+  },
+  {} as Record<string, string>
+);
+
 // TODO: In the "real world", implement full T9 mapping + dictionary-based scoring.
 function generateBestVanityNumbers(phone: string): string[] {
   const area = phone.slice(0, 3);
   const prefix = phone.slice(3, 6);
   const line = phone.slice(6);
 
-  
+  const matches = CANDIDATE_WORDS.filter(
+    (word) => word.length === 4 && wordToT9(word) === line
+  );
 
-  return [
-    `${area}-${prefix}-CALL`,
-    `${area}-${prefix}-HELP`,
-    `${area}-${prefix}-AWSX`,
-    `${area}-${prefix}-${line}`,
-    phone,
-  ];
+  const results = matches.map(
+    (word) => `${area}-${prefix}-${word.toUpperCase()}`
+  );
+
+  // Fallback words if not enough matches to satisfy crit
+  const FALLBACK_WORDS = ["CALL", "HELP", "SALE", "HOME", "FREE"];
+
+  for (const word of FALLBACK_WORDS) {
+    if (results.length >= 5) break;
+    results.push(`${area}-${prefix}-${word}`);
+  }
+
+  // Numeric fallback(s) if still short
+  if (results.length < 5) {
+    results.push(`${area}-${prefix}-${line}`);
+  }
+  results.push(phone);
+
+  return Array.from(new Set(results)).slice(0, 5);
 }
