@@ -59,7 +59,6 @@ function App() {
         >
           <thead>
             <tr>
-              <th style={thStyle}>Time</th>
               <th style={thStyle}>Caller Number</th>
               <th style={thStyle}>Top Vanity Numbers</th>
             </tr>
@@ -67,11 +66,6 @@ function App() {
           <tbody>
             {calls.map((call, index) => (
               <tr key={index}>
-                <td style={tdStyle}>
-                  {call.timestamp
-                    ? new Date(call.timestamp).toLocaleString()
-                    : "—"}
-                </td>
                 <td style={tdStyle}>{call.callerNumber}</td>
                 <td style={tdStyle}>
                   {call.vanityNumbers && call.vanityNumbers.length > 0 ? (
