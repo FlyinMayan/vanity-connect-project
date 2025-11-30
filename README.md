@@ -10,6 +10,15 @@ This project implements a small end-to-end system that:
 
 ---
 
+## Live Frontend Demo
+
+You can view the frontend here (no setup required):
+
+👉 https://flyinmayan.github.io/vanity-connect-project/
+
+This React app calls the live `/recent-callers` API in AWS and displays
+the last 5 callers and their vanity numbers.
+
 ## High-Level Architecture
 
 1. **Caller dials Amazon Connect number**
