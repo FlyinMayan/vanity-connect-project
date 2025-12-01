@@ -19,6 +19,9 @@ You can view the frontend here (no setup required):
 This React app calls the live `/recent-callers` API in AWS and displays
 the last 5 callers and their vanity numbers.
 
+To test the service call: +1 844-448-0120
+Once the call has been completed, refresh the browser to see the most recent call. 
+
 ## High-Level Architecture
 
 1. **Caller dials Amazon Connect number**
